@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.log
+# Environment folders
+env/
+venv/
+ENV/
+.VENV/
+.venv/
+*.env
+.vscode/
+**/site-packages/
