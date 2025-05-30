@@ -1,59 +1,59 @@
-import os
 import chess
 import chess.engine
+import os
 
 def get_stockfish_path():
-    if os.name == 'nt':  # Windows
-        return './stockfish.exe'
-    else:  # Linux/Mac (automarker)
+    if os.name == 'nt':
+        return r"C:\Users\bokel\OneDrive - University of Witwatersrand\Honours\COMS4033A-AI\Project\AI-RBC\stockfish.exe"
+    else:
         return '/opt/stockfish/stockfish'
 
-def get_king_capture_move(board):
+def find_king_capture(board):
     for move in board.pseudo_legal_moves:
         if board.is_capture(move):
-            captured_square = move.to_square
-            captured_piece = board.piece_at(captured_square)
+            captured_piece = board.piece_at(move.to_square)
             if captured_piece and captured_piece.piece_type == chess.KING:
-                return move
+                return move.uci()
     return None
 
-def choose_move(fen, engine):
-    board = chess.Board(fen)
+def evaluate_moves(fens):
+    engine = chess.engine.SimpleEngine.popen_uci(get_stockfish_path(), setpgrp=True)
+    move_frequency = {}
 
-    # Try to capture the opponent's king
-    capture_move = get_king_capture_move(board)
-    if capture_move:
-        return capture_move.uci()
+    for fen in fens:
+        board = chess.Board(fen)
 
-    # Otherwise ask Stockfish
-    result = engine.play(board, chess.engine.Limit(time=0.5))
-    return result.move.uci()
+        # Priority 1: Capture opponent king if possible
+        king_capture = find_king_capture(board)
+        if king_capture:
+            engine.quit()
+            return king_capture
 
+        # Otherwise: ask Stockfish
+        best_move = engine.play(board, chess.engine.Limit(time=0.1)).move.uci()
 
-N = int(input())
-fens = [input().strip() for _ in range(N)]
+        move_frequency[best_move] = move_frequency.get(best_move, 0) + 1
 
-move_counts = {}
+    engine.quit()
+    return resolve_majority_vote(move_frequency)
 
-engine = chess.engine.SimpleEngine.popen_uci(get_stockfish_path(), setpgrp=True)
+def resolve_majority_vote(move_counts):
+    if not move_counts:
+        return None
 
-for fen in fens:
-    move = choose_move(fen, engine)
-    if move in move_counts:
-        move_counts[move] += 1
-    else:
-        move_counts[move] = 1
+    # Sort alphabetically, then by frequency
+    sorted_moves = sorted(move_counts.items())
+    most_common_move = max(sorted_moves, key=lambda x: x[1])[0]
 
-engine.quit()
+    return most_common_move
 
-# Find most common move; break ties alphabetically
-most_common_move = None
-highest_count = 0
+def main():
+    num_boards = int(input())
+    fens = [input().strip() for _ in range(num_boards)]
 
-for move in sorted(move_counts):  # Alphabetical tie-breaker
-    count = move_counts[move]
-    if count > highest_count:
-        highest_count = count
-        most_common_move = move
-print(most_common_move)
+    selected_move = evaluate_moves(fens)
+    if selected_move:
+        print(selected_move)
 
+if __name__ == '__main__':
+    main()

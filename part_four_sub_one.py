@@ -1,6 +1,10 @@
+from reconchess import Player
+import chess
 import chess.engine
 import random
+from collections import defaultdict
 from reconchess import *
+from reconchess.utilities import without_opponent_pieces, is_illegal_castle
 import os
 
 STOCKFISH_ENV_VAR = 'STOCKFISH_EXECUTABLE'
@@ -116,22 +120,17 @@ def generate_capture_resulting_fens(board:chess.Board, capture_square_str):
                 next_fens.add(new_board.fen())
 
     # 3. Return sorted list
-    return sorted(next_fens) 
+    return sorted(next_fens)   
 
-
-class TroutBot(Player):
-    """
-    TroutBot uses the Stockfish chess engine to choose moves. In order to run TroutBot you'll need to download
-    Stockfish from https://stockfishchess.org/download/ and create an environment variable called STOCKFISH_EXECUTABLE
-    that is the path to the downloaded Stockfish executable.
-    """
-
+class ImprovedAgent(Player):
     def __init__(self):
-        self.board = None
+        super().__init__()
         self.color = None
-        self.my_piece_captured_square = None
+        self.engine = None
+        self.board = None
+        self.belief_states = []
+        self.possible_moves = []
 
-        # make sure stockfish environment variable exists
         if STOCKFISH_ENV_VAR not in os.environ:
             raise KeyError(
                 'TroutBot requires an environment variable called "{}" pointing to the Stockfish executable'.format(
@@ -141,76 +140,48 @@ class TroutBot(Player):
         stockfish_path = os.environ[STOCKFISH_ENV_VAR]
         if not os.path.exists(stockfish_path):
             raise ValueError('No stockfish executable found at "{}"'.format(stockfish_path))
-
-        # initialize the stockfish engine
+        
         self.engine = chess.engine.SimpleEngine.popen_uci(stockfish_path, setpgrp=True)
 
-    def handle_game_start(self, color: Color, board: chess.Board, opponent_name: str):
-        self.board = board
+    def handle_game_start(self, color:bool, board:chess.Board, opponent_name:str):
         self.color = color
+        self.board = board
+        #self.belief_states = generate_next_fens(self.board)
+       # self.possible_moves = generate_all_possible_moves(self.board)
 
-    def handle_opponent_move_result(self, captured_my_piece: bool, capture_square: Optional[Square]):
-        # if the opponent captured our piece, remove it from our board.
-        self.my_piece_captured_square = capture_square
+    def handle_opponent_move_result(self, captured_my_piece:bool, capture_square: Optional[Square]):
+
         if captured_my_piece:
             self.board.remove_piece_at(capture_square)
 
-    def choose_sense(self, sense_actions: List[Square], move_actions: List[chess.Move], seconds_left: float) -> Optional[Square]:
-        # 1. If we were just captured, sense where it happened
-        if self.my_piece_captured_square and self.my_piece_captured_square in sense_actions:
-            return self.my_piece_captured_square
+    def choose_sense(self, sense_actions: List[Square], move_actions: List[chess.Move], seconds_left:float) -> Square:
 
-        # 2. Try to sense enemy king if its position is known
-        enemy_king_square = self.board.king(not self.color)
-        if enemy_king_square and enemy_king_square in sense_actions:
-            return enemy_king_square
-
-        # 3. Sense where we’re most likely to attack
-        capture_targets = [m.to_square for m in move_actions if self.board.is_capture(m)]
-        weighted_targets = sorted(set(capture_targets), key=lambda sq: len(self.board.attackers(not self.color, sq)), reverse=True)
-        for square in weighted_targets:
-            if square in sense_actions:
-                return square
-
-        # 4. Fallback
         return random.choice(sense_actions)
-
-    def handle_sense_result(self, sense_result: List[Tuple[Square, Optional[chess.Piece]]]):
-        # add the pieces in the sense result to our board
+    
+    def handle_sense_result(self, sense_result:List[Tuple[Square, Optional[chess.Piece]]]):
+     
         for square, piece in sense_result:
-            self.board.set_piece_at(square, piece)
+            if piece is None:
+                self.board.remove_piece_at(square)
+            else:
+                self.board.set_piece_at(square,piece)
 
-    def choose_move(self, move_actions: List[chess.Move], seconds_left: float) -> Optional[chess.Move]:
-        # if we might be able to take the king, try to
-        enemy_king_square = self.board.king(not self.color)
-        if enemy_king_square:
-            # if there are any ally pieces that can take king, execute one of those moves
-            enemy_king_attackers = self.board.attackers(self.color, enemy_king_square)
-            if enemy_king_attackers:
-                attacker_square = enemy_king_attackers.pop()
-                return chess.Move(attacker_square, enemy_king_square)
+    def choose_move(self, move_actions: List[chess.Move], seconds_left:float)-> Optional[chess.Move]:
+        
+        capture_move = get_king_capture_move(self.board,move_actions,self.color)
 
-        # otherwise, try to move with the stockfish chess engine
-        try:
-            self.board.turn = self.color
-            self.board.clear_stack()
-            result = self.engine.play(self.board, chess.engine.Limit(time=0.5))
-            return result.move
-        except chess.engine.EngineTerminatedError:
-            print('Stockfish Engine died')
-        except chess.engine.EngineError:
-            print('Stockfish Engine bad state at "{}"'.format(self.board.fen()))
+        if capture_move:
+            return capture_move
+        
+        return random.choice(move_actions)
 
-        # if all else fails, pass
-        return None
 
-    def handle_move_result(self, requested_move: Optional[chess.Move], taken_move: Optional[chess.Move],
-                           captured_opponent_piece: bool, capture_square: Optional[Square]):
-        # if a move was executed, apply it to our board
+    def handle_move_result(self, requested_move: chess.Move, taken_move:chess.Move, captured_opponent_piece:bool, capture_square:Optional[Square]):
+      
         if taken_move is not None:
             self.board.push(taken_move)
 
-    def handle_game_end(self, winner_color: Optional[Color], win_reason: Optional[WinReason],
+    def handle_game_end(self, winner_color: Optional[bool], win_reason: Optional[WinReason],
                         game_history: GameHistory):
         try:
             # if the engine is already terminated then this call will throw an exception

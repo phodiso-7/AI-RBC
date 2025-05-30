@@ -155,24 +155,21 @@ class TroutBot(Player):
         if captured_my_piece:
             self.board.remove_piece_at(capture_square)
 
-    def choose_sense(self, sense_actions: List[Square], move_actions: List[chess.Move], seconds_left: float) -> Optional[Square]:
-        # 1. If we were just captured, sense where it happened
-        if self.my_piece_captured_square and self.my_piece_captured_square in sense_actions:
+    def choose_sense(self, sense_actions: List[Square], move_actions: List[chess.Move], seconds_left: float) -> \
+            Optional[Square]:
+        # if our piece was just captured, sense where it was captured
+        if self.my_piece_captured_square:
             return self.my_piece_captured_square
 
-        # 2. Try to sense enemy king if its position is known
-        enemy_king_square = self.board.king(not self.color)
-        if enemy_king_square and enemy_king_square in sense_actions:
-            return enemy_king_square
+        # if we might capture a piece when we move, sense where the capture will occur
+        future_move = self.choose_move(move_actions, seconds_left)
+        if future_move is not None and self.board.piece_at(future_move.to_square) is not None:
+            return future_move.to_square
 
-        # 3. Sense where we’re most likely to attack
-        capture_targets = [m.to_square for m in move_actions if self.board.is_capture(m)]
-        weighted_targets = sorted(set(capture_targets), key=lambda sq: len(self.board.attackers(not self.color, sq)), reverse=True)
-        for square in weighted_targets:
-            if square in sense_actions:
-                return square
-
-        # 4. Fallback
+        # otherwise, just randomly choose a sense action, but don't sense on a square where our pieces are located
+        for square, piece in self.board.piece_map().items():
+            if piece.color == self.color:
+                sense_actions.remove(square)
         return random.choice(sense_actions)
 
     def handle_sense_result(self, sense_result: List[Tuple[Square, Optional[chess.Piece]]]):
