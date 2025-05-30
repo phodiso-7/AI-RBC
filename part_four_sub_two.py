@@ -9,7 +9,6 @@ import os
 
 STOCKFISH_ENV_VAR = 'STOCKFISH_EXECUTABLE'
 
-
 def parse_window(window_str):
     """
     Parses the window description into a dictionary:
@@ -174,7 +173,7 @@ class ImprovedAgent(Player):
         if capture_move:
             return capture_move
         
-        random.choice(move_actions)
+        return random.choice(move_actions)
 
 
     def handle_move_result(self, requested_move: chess.Move, taken_move:chess.Move, captured_opponent_piece:bool, capture_square:Optional[Square]):
